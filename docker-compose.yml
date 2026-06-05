@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: rag_postgres
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"    # 서버 받으면 팀 합의 후 변경
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mcp-server:
+    build: ./mcp_server
+    container_name: rag_mcp_server
+    env_file: .env
+    ports:
+      - "8000:8000"    # 서버 받으면 팀 합의 후 변경
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  loader:
+    build: ./loader
+    container_name: rag_loader
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+    profiles:
+      - load
+
+volumes:
+  pgdata:
