@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5432:5432"    # 서버 받으면 팀 합의 후 변경
+      - "5435:5432"    # 서버 받으면 팀 합의 후 변경
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +22,7 @@ services:
     container_name: rag_mcp_server
     env_file: .env
     ports:
-      - "8000:8000"    # 서버 받으면 팀 합의 후 변경
+      - "8001:8001"    # 서버 받으면 팀 합의 후 변경
     depends_on:
       postgres:
         condition: service_healthy

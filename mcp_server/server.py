@@ -1,20 +1,17 @@
 import os
+import sys
 import psycopg2
 from mcp.server.fastmcp import FastMCP
 from sentence_transformers import SentenceTransformer
 
-mcp = FastMCP(
-    "rag-study",
-    host=os.getenv("MCP_HOST", "0.0.0.0"),
-    port=int(os.getenv("MCP_PORT", 8000))
-)
+mcp = FastMCP("rag-mcp-test")
 model = None
 
 
 def get_model():
     global model
     if model is None:
-        print(f"모델 로드 중: {os.getenv('EMBEDDING_MODEL')}")
+        print(f"모델 로드 중: {os.getenv('EMBEDDING_MODEL')}", file=sys.stderr)
         model = SentenceTransformer(os.getenv("EMBEDDING_MODEL"))
     return model
 
@@ -92,4 +89,4 @@ def search_docs(query: str) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    mcp.run(transport="stdio")
