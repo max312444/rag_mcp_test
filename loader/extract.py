@@ -3,17 +3,35 @@ import os
 import re
 
 
+def table_to_markdown(table: list[list]) -> str:
+    if not table:
+        return ""
+    rows = []
+    for i, row in enumerate(table):
+        cleaned = [str(cell or "").strip().replace("\n", " ") for cell in row]
+        rows.append("| " + " | ".join(cleaned) + " |")
+        if i == 0:
+            rows.append("|" + "|".join(["---"] * len(row)) + "|")
+    return "\n".join(rows)
+
+
 def extract_text_by_page(pdf_path: str) -> list[dict]:
     """
-    PDF에서 페이지별 텍스트 추출
+    PDF에서 페이지별 텍스트 추출 (표 포함)
     반환: [{"page_num": 1, "text": "..."}, ...]
     """
     pages = []
 
     with pdfplumber.open(pdf_path) as pdf:
         for i, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text()
-            if text:
+            text = page.extract_text() or ""
+
+            tables = page.extract_tables()
+            if tables:
+                table_texts = [table_to_markdown(t) for t in tables if t]
+                text += "\n\n" + "\n\n".join(table_texts)
+
+            if text.strip():
                 pages.append({
                     "page_num": i,
                     "text": text.strip()
