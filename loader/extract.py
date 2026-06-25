@@ -1,5 +1,5 @@
 import pdfplumber
-import os
+import json
 import re
 
 
@@ -18,40 +18,32 @@ def table_to_markdown(table: list[list]) -> str:
 def extract_text_by_page(pdf_path: str) -> list[dict]:
     """
     PDF에서 페이지별 텍스트 추출 (표 포함)
-    반환: [{"page_num": 1, "text": "..."}, ...]
     """
     pages = []
-
     with pdfplumber.open(pdf_path) as pdf:
         for i, page in enumerate(pdf.pages, start=1):
             text = page.extract_text() or ""
-
             tables = page.extract_tables()
             if tables:
                 table_texts = [table_to_markdown(t) for t in tables if t]
                 text += "\n\n" + "\n\n".join(table_texts)
-
             if text.strip():
-                pages.append({
-                    "page_num": i,
-                    "text": text.strip()
-                })
-
+                pages.append({"page_num": i, "text": text.strip()})
     return pages
 
 
 def extract_sections(pages: list[dict]) -> list[dict]:
     """
-    페이지 텍스트를 대섹션 기준으로 분리
-    기준: Ⅰ, Ⅱ, Ⅲ, Ⅳ, Ⅴ, Ⅵ, Ⅶ, Ⅷ, 붙임
-    반환: [{"section": "Ⅰ 사업 개요", "content": "...", "page_num": 1}, ...]
+    페이지 텍스트를 장(Chapter) 기준으로 분리
+    패턴: 줄 시작의 제1장, 제2장, ... / 별표(독립 헤더), 부칙
     """
     full_text = ""
     for p in pages:
         full_text += f"\n[PAGE:{p['page_num']}]\n{p['text']}"
 
     section_pattern = re.compile(
-        r'(Ⅰ|Ⅱ|Ⅲ|Ⅳ|Ⅴ|Ⅵ|Ⅶ|Ⅷ|붙임\s*\d+)\s+[^\n]+'
+        r'^(제\d+장\s+[^\n<]+|[ⅠⅡⅢⅣⅤⅥⅦⅧ]\s+[^\n<]+)',
+        re.MULTILINE
     )
 
     matches = list(section_pattern.finditer(full_text))
@@ -63,13 +55,16 @@ def extract_sections(pages: list[dict]) -> list[dict]:
 
         section_text = full_text[start:end].strip()
 
-        page_match = re.search(r'\[PAGE:(\d+)\]', full_text[max(0, start-100):start+100])
-        page_num = int(page_match.group(1)) if page_match else 0
+        page_markers = list(re.finditer(r'\[PAGE:(\d+)\]', full_text[:start + 50]))
+        page_num = int(page_markers[-1].group(1)) if page_markers else 1
 
         clean_text = re.sub(r'\[PAGE:\d+\]', '', section_text).strip()
 
+        section_name = match.group(1).strip()
+        section_name = re.sub(r'\s*<[^>]+>\s*$', '', section_name).strip()
+
         sections.append({
-            "section": match.group(0).strip(),
+            "section": section_name,
             "content": clean_text,
             "page_num": page_num
         })
@@ -77,8 +72,64 @@ def extract_sections(pages: list[dict]) -> list[dict]:
     return sections
 
 
+def extract_tables_structured(pdf_path: str, sections: list[dict]) -> list[dict]:
+    """
+    PDF에서 표를 구조화하여 추출.
+    각 표에 소속 섹션, 캡션, 헤더, 행 데이터 포함.
+    """
+    section_pages = {}
+    for s in sections:
+        section_pages[s["page_num"]] = s["section"]
+
+    tables_out = []
+
+    with pdfplumber.open(pdf_path) as pdf:
+        for i, page in enumerate(pdf.pages, start=1):
+            raw_tables = page.extract_tables()
+            if not raw_tables:
+                continue
+
+            page_text = page.extract_text() or ""
+
+            owner_section = None
+            for pn in sorted(section_pages.keys(), reverse=True):
+                if i >= pn:
+                    owner_section = section_pages[pn]
+                    break
+
+            for table in raw_tables:
+                if not table or len(table) < 2:
+                    continue
+
+                headers_row = table[0]
+                headers = [str(c or "").strip().replace("\n", " ") for c in headers_row]
+                rows = []
+                for row in table[1:]:
+                    cleaned = [str(c or "").strip().replace("\n", " ") for c in row]
+                    rows.append(cleaned)
+
+                md = table_to_markdown(table)
+
+                caption_match = re.search(
+                    r'((?:별표|표)\s*\d*[^\n]*)', page_text
+                )
+                caption = caption_match.group(1).strip() if caption_match else None
+
+                tables_out.append({
+                    "page_num": i,
+                    "section": owner_section,
+                    "caption": caption,
+                    "headers": json.dumps(headers, ensure_ascii=False),
+                    "rows": rows,
+                    "content_markdown": md,
+                })
+
+    return tables_out
+
+
 if __name__ == "__main__":
-    pdf_path = "/app/data/2026_해외취업연수사업.pdf"
+    import sys
+    pdf_path = sys.argv[1] if len(sys.argv) > 1 else "/app/data/영진전문대학교 학칙.pdf"
 
     print("PDF 텍스트 추출 중...")
     pages = extract_text_by_page(pdf_path)
@@ -87,6 +138,11 @@ if __name__ == "__main__":
     print("섹션 분리 중...")
     sections = extract_sections(pages)
     print(f"총 {len(sections)}개 섹션 추출 완료")
-
     for s in sections:
-        print(f"[{s['page_num']}p] {s['section']} - {len(s['content'])}자")
+        print(f"  [{s['page_num']}p] {s['section']} - {len(s['content'])}자")
+
+    print("\n표 추출 중...")
+    tables = extract_tables_structured(pdf_path, sections)
+    print(f"총 {len(tables)}개 표 추출 완료")
+    for t in tables:
+        print(f"  [{t['page_num']}p] {t['section']} - {t['caption']}")
